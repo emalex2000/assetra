@@ -1,0 +1,8 @@
+Django
+djangorestframework
+django-filter
+drf-spectacular
+django-simple-history
+celery
+redis
+psycopg2-binary
