@@ -9,6 +9,7 @@ from .permissions import IsVerified
 from django.core.cache import cache
 # from django_ratelimit.decorators import ratelimit
 # from django.utils.decorators import method_decorator
+from .serializer import CompanySerializer
 
 User = get_user_model()
 
@@ -123,3 +124,25 @@ class VerifyOtpView(APIView):
         cache.delete(f"otp_last_sent_{email}")
 
         return Response({'Message' : 'Account verified successfully'}, status=200)
+    
+class CreateCompanyView(APIView):
+    permission_classes = [IsAuthenticated, IsVerified]
+
+    def post(self, request):
+        serializer = CompanySerializer(data=request.data)
+
+        if serializer.is_valid():
+            company = serializer.save()
+
+            # attach user to company
+            user = request.user
+            user.company = company
+            user.roles = "ADMIN" # fisrt user becomes admin
+            user.save()
+
+            return Response({
+                "message": "Company created succesfully", 
+                "company": serializer.data
+                }, status=201)
+        return Response(serializer.errors, status=400)
+            
