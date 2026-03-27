@@ -10,20 +10,26 @@ from django.core.cache import cache
 # from django_ratelimit.decorators import ratelimit
 # from django.utils.decorators import method_decorator
 from .serializer import CompanySerializer
+from django.db import transaction
 
 User = get_user_model()
+
+def normalize_email(email:str) -> str:
+    return email.strip().lower()
+
+
 
 # @method_decorator(ratelimit(key='ip', rate='5/m', block=True), name='dispatch')
 class RegisterView(APIView):
     permission_classes = []
     def post(self, request):
         username = None
-        email = request.data.get("email")
+        email = normalize_email(request.data.get("email", ""))
         phone_number = request.data.get("phone_number")
         password = request.data.get("password")
 
         if not email or not phone_number or not password:
-            return Response({"error":"Fields must not be empty"}, status=400)
+            return Response({"error":"All Fields required"}, status=400)
         
         if User.objects.filter(email=email).exists():
             return Response({"error":"An otp will be sent if the user exist"}, status=400)
@@ -33,25 +39,26 @@ class RegisterView(APIView):
         
         try:
             validate_password(password)
-
         except Exception as e:
             return Response({"error":list(e.messages)}, status=400)
         
-        #create user
-        user = User.objects.create_user(
-            email=email,
-            password=password,
-    )
-        user.phone_number = phone_number
-        user.is_valid = False
-        user.save()
+        with transaction.atomic():
+            #create user
+            user = User.objects.create_user(
+                email=email,
+                password=password,
+                phone_number=phone_number,
+                is_valid=False,
+        )
+            otp = generate_otp()
+            import hashlib
+            hashed_otp = hashlib.sha256(otp.encode()).hexdigest()
 
-        otp = generate_otp()
-        cache.set(f"otp_{email}", otp, timeout=300) # 5mins
-        cache.set(f"otp_attempts_{email}", 0, timeout=300)
-        send_otp_email(email, otp)
+            cache.set(f"otp_{email}", hashed_otp, timeout=300) # 5mins
+            cache.set(f"otp_attempts_{email}", 0, timeout=300)
+            send_otp_email(email, otp)
 
-        return Response({'message': f'account created otp sent to {user.email} '}, status=200)
+        return Response({'message': f'otp sent to {email} '}, status=201)
 
 # @method_decorator(ratelimit(key='ip', rate='3/m', block=True), name='dispatch')
 class ResendOtpView(APIView):
