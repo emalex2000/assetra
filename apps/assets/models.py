@@ -24,18 +24,16 @@ ASSIGNMENT_STATUS = [
     ("TRANSFERRED", "Transferred"),
     ("OVERDUE", "Overdue"),
 ]
-
-
-
 class AssetCategories(models.Model):
     category_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=200, null=True)
     description = models.TextField(blank=True)
+    company = models.ForeignKey(Company, on_delete=models.SET_NULL)
 
     def __str__(self):
         return self.name
-
-
+    
+    
 class Asset(models.Model):
     asset_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=200, null=True)
