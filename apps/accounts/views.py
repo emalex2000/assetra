@@ -148,7 +148,7 @@ class CreateOrganisationView(APIView):
         if not data.get("organisation_phone_number"):
             data["organisation_phone_number"] = request.user.phone_number
 
-        serializer = CompanySerializer(data=request.data)
+        serializer = CompanySerializer(data=data)
         if serializer.is_valid():
             company = serializer.save(owner=request.user)
 
