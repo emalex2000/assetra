@@ -12,7 +12,17 @@ User = get_user_model()
 class CompanySerializer(serializers.ModelSerializer):
     class Meta:
         model = Company
-        fields = "__all__"
+        fields = [ "company_id",
+            "name",
+            "country",
+            "industry",
+            "organisation_email",
+            "organisation_phone_number",
+            "company_size",
+            "company_type",
+            "company_logo",
+            "created_at",
+            ]
         read_only_fields = ["company_id", "owner", "created_at"]
 
 
