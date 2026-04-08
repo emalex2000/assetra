@@ -12,7 +12,8 @@ User = get_user_model()
 class CompanySerializer(serializers.ModelSerializer):
     class Meta:
         model = Company
-        fields = [ "company_id",
+        fields = [ 
+            "company_id",
             "name",
             "country",
             "industry",
@@ -22,8 +23,31 @@ class CompanySerializer(serializers.ModelSerializer):
             "company_type",
             "company_logo",
             "created_at",
+            "owner"
             ]
         read_only_fields = ["company_id", "owner", "created_at"]
 
 
+class MyOrganisationSerializer(serializers.ModelSerializer):
+    membersCount = serializers.SerializerMethodField()
+    assetCount = serializers.SerializerMethodField
+    class Meta:
+        model = Company
+        fields = [
+            "company_id",
+            "name",
+            "industry",
+            "company_size",
+            "country",
+            "created_at",
+            "company_logo",
+            "membersCount",
+            "assetsCount",
+        ]
+        read_only_fields = ["company_id"]
+
+        def get_membersCount(self, obj):
+            return obj.members.filter(is_active=True).count()
         
+        def get_assetsCount(self, obj):
+            return obj.assets.count()

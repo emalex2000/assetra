@@ -9,14 +9,14 @@ from .permissions import IsVerified, CanAssignAsset
 from django.core.cache import cache
 # from django_ratelimit.decorators import ratelimit
 # from django.utils.decorators import method_decorator
-from .serializer import CompanySerializer
+from .serializer import CompanySerializer, MyOrganisationSerializer
 from django.db import transaction
 from .models import OrganisationMember, Invite
 from rest_framework.exceptions import PermissionDenied
 from datetime import timedelta
 from django.utils import timezone
 import hashlib
-
+from django.contrib.auth import authenticate
 
 User = get_user_model()
 
@@ -64,6 +64,7 @@ class RegisterView(APIView):
             send_otp_email(email, otp)
 
         return Response({'message': f'otp sent to {email} '}, status=201)
+
 
 # @method_decorator(ratelimit(key='ip', rate='3/m', block=True), name='dispatch')
 class ResendOtpView(APIView):
@@ -199,3 +200,15 @@ class CreateInviteview(APIView):
             "role": invite.role,
             "expires_at": invite.expires_at,
         }, status=201)
+    
+
+class MyOrganisationsView(APIView):
+    permission_classes = [IsAuthenticated, IsVerified]
+
+    def get(self, request):
+        memberships = OrganisationMember.objects.filter(
+            user=request.user, is_active=True
+            ).select_related("company")
+        companies = [memberships.company for membership in memberships if membership.company ]
+        serializer = MyOrganisationSerializer(companies, many=True)
+        return Response(serializer.data, status=200)
