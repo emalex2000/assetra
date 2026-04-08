@@ -2,6 +2,13 @@ from rest_framework import serializers
 from .models import Asset, AssetCategories, AssetAssignment
 
 class AssetSerializer(serializers.ModelSerializer):
+    def validate_category(self, value):
+            user = self.context["request"].user
+
+            if value and value.company != user.company:
+                raise serializers.ValidationError("invalid category for your company")
+            return value
+
     class Meta:
         model = Asset
         fields = [
@@ -15,13 +22,6 @@ class AssetSerializer(serializers.ModelSerializer):
             "location_country"
         ]
         read_only_fields = ["asset_id"]
-        def validate_category(self, value):
-            user = self.context["request"].user
-
-            if value and value.company != user.company:
-                raise serializers.ValidationError("invalid category for your company")
-            return value
-
 
 class AssetCategorySerializer(serializers.ModelSerializer):
     class Meta:

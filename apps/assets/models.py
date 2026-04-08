@@ -18,6 +18,7 @@ CONDITION_CHOICES = [
     ("REPAIRED", "Repaired"),
 ]
 
+
 ASSIGNMENT_STATUS = [
     ("ACTIVE", "Active"),
     ('RETURNED', "Returned"),
@@ -28,7 +29,7 @@ class AssetCategories(models.Model):
     category_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=200, null=True)
     description = models.TextField(blank=True)
-    company = models.ForeignKey(Company, on_delete=models.SET_NULL)
+    company = models.ForeignKey(Company, on_delete=models.SET_NULL, null=True)
 
     def __str__(self):
         return self.name
@@ -48,6 +49,8 @@ class Asset(models.Model):
     location_country = CountryField(blank=True)
     history = HistoricalRecords()
     
+    class Meta:
+        unique_together = ["serial_number", "company"]
     def __str__(self):
         return f"{self.name} - {self.serial_number}"
     
@@ -63,6 +66,10 @@ class AssetAssignment(models.Model):
     status = models.CharField(max_length=30, choices=ASSIGNMENT_STATUS, default="ACTIVE")
     notes = models.TextField(blank=True)
 
+    class Meta:
+        unique_together = ["asset", "user"]
+
+        
     def __str__(self):
         return f"{self.asset} -> {self.user}"
 

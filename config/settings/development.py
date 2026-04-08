@@ -21,4 +21,4 @@ CACHES = {
         # "LOCATION": "ratelimit_cache_table",
     }
 }
-CORS_ALLOW_ALL_ORIGIN = True
+CORS_ALLOW_ALL_ORIGINS = True

@@ -35,8 +35,8 @@ class AssetAssigmentView(CreateAPIView):
         if not user.company:
             raise PermissionDenied("must belong to a company")
     
-        asset = serializer.validated_data("asset")
-        assignee = serializer.validated_data("user")
+        asset = serializer.validated_data.get("asset")
+        assignee = serializer.validated_data.get("user")
 
         if asset.company != user.company:
             raise PermissionDenied("Asset does not belong to your company")
@@ -47,9 +47,7 @@ class AssetAssigmentView(CreateAPIView):
         if asset.status != "AVAILABLE":
             raise PermissionDenied("Asset is not available")
         
-        assignment = serializer.save(
-                assigned_by=user
-            )
+        assignment = serializer.save(assigned_by=user)
         asset.status = "ASSIGNED"
         asset.current_holder = assignee
         asset.save()

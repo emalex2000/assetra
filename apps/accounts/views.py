@@ -5,12 +5,18 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.contrib.auth.password_validation import validate_password
-from .permissions import IsVerified
+from .permissions import IsVerified, CanAssignAsset
 from django.core.cache import cache
 # from django_ratelimit.decorators import ratelimit
 # from django.utils.decorators import method_decorator
 from .serializer import CompanySerializer
 from django.db import transaction
+from .models import OrganisationMember, Invite
+from rest_framework.exceptions import PermissionDenied
+from datetime import timedelta
+from django.utils import timezone
+import hashlib
+
 
 User = get_user_model()
 
@@ -23,7 +29,6 @@ def normalize_email(email:str) -> str:
 class RegisterView(APIView):
     permission_classes = []
     def post(self, request):
-        username = None
         email = normalize_email(request.data.get("email", ""))
         phone_number = request.data.get("phone_number")
         password = request.data.get("password")
@@ -32,7 +37,7 @@ class RegisterView(APIView):
             return Response({"error":"All Fields required"}, status=400)
         
         if User.objects.filter(email=email).exists():
-            return Response({"error":"An otp will be sent if the user exist"}, status=400)
+            return Response({"error":"Email already exist"}, status=400)
 
         if User.objects.filter(phone_number=phone_number).exists():
             return Response({"error":"Phone number already exists"}, status=400)
@@ -51,7 +56,7 @@ class RegisterView(APIView):
                 is_valid=False,
         )
             otp = generate_otp()
-            import hashlib
+            
             hashed_otp = hashlib.sha256(otp.encode()).hexdigest()
 
             cache.set(f"otp_{email}", hashed_otp, timeout=300) # 5mins
@@ -65,14 +70,15 @@ class ResendOtpView(APIView):
     permission_classes = []
 
     def post(self, request):
-        email = request.data.get("email")
+        email = normalize_email(request.data.get("email", ""))
         last_sent = cache.get(f"otp_last_sent_{email}")
 
         if last_sent:
             return Response({"error" : "wait 60 seconds before requesting another code"}, status=429)
         
         otp = generate_otp()
-        cache.set(f"otp_{email}", otp, timeout=300)
+        hashed_otp = hashlib.sha256(otp.encode()).hexdigest()
+        cache.set(f"otp_{email}", hashed_otp, timeout=300)
         cache.set(f"otp_attempts_{email}", 0, timeout=300)
         cache.set(f"otp_last_sent_{email}", True, timeout=60)
 
@@ -89,7 +95,6 @@ def current_user(request):
     return Response(
         {
             'id': request.user.id,
-            'username': request.user.username,
             'email': request.user.email,
         }
     )
@@ -99,21 +104,19 @@ def current_user(request):
 class VerifyOtpView(APIView):
     permission_classes = []
     def post(self, request):
-        email = request.data.get("email")
+        email = normalize_email(request.data.get("email", ""))
         otp = request.data.get("otp")
 
         otp_stored = cache.get(f"otp_{email}")
         attempts = cache.get(f"otp_attempts_{email}", 0)
-
+        hashed_otp = hashlib.sha256(otp.encode()).hexdigest()
         if not otp_stored:
             return Response({'error': 'otp expired or not found'}, status=400)
         
         if attempts >= 5:
             return Response({'error': 'Maximum attempts exceeded'}, status=403)
         
-
-        
-        if otp != otp_stored:
+        if hashed_otp != otp_stored:
             cache.set(f'otp_attempts_{email}', attempts + 1, timeout=300)
             return Response({"error": f"Invalid otp, {5 - (attempts +1)} attempts left"}, status=400)
         
@@ -132,20 +135,30 @@ class VerifyOtpView(APIView):
 
         return Response({'Message' : 'Account verified successfully'}, status=200)
     
-class CreateCompanyView(APIView):
+class CreateOrganisationView(APIView):
     permission_classes = [IsAuthenticated, IsVerified]
 
     def post(self, request):
-        serializer = CompanySerializer(data=request.data)
+        data = request.data.copy()
 
+        if not data.get("organisation_email"):
+            data["organisation_email"] = request.user.email
+        
+
+        if not data.get("organisation_phone_number"):
+            data["organisation_phone_number"] = request.user.phone_number
+
+        serializer = CompanySerializer(data=request.data)
         if serializer.is_valid():
-            company = serializer.save()
+            company = serializer.save(owner=request.user)
 
             # attach user to company
-            user = request.user
-            user.company = company
-            user.roles = "ADMIN" # fisrt user becomes admin
-            user.save()
+            OrganisationMember.objects.create(
+                user = request.user,
+                company = company,
+                role = "ADMIN", # fisrt user becomes admin
+            )
+            
 
             return Response({
                 "message": "Company created succesfully", 
@@ -153,3 +166,36 @@ class CreateCompanyView(APIView):
                 }, status=201)
         return Response(serializer.errors, status=400)
             
+
+class CreateInviteview(APIView):
+    permission_classes = [IsAuthenticated, IsVerified, CanAssignAsset]
+
+    def post(self, request):
+        email = request.data.get("email")
+        role = request.data.get("role")
+
+        if role not in ["STAFF", "RECIPIENT"]:
+            return Response({"error": "invalid"}, status=400)
+        
+        membership = OrganisationMember.objects.filter(
+            user=request.user,
+            is_active=True
+        ).first()
+
+        if not membership or membership.role not in ["ADMIN", "STAFF"]:
+            raise PermissionDenied("Action not allowed")
+        
+        invite = Invite.objects.create(
+            company=membership.company,
+            email=email,
+            role=role,
+            expires_at=timezone.now()+timedelta(days=2)
+        )
+
+        return Response({
+            "message": "Invited Created Successfully",
+            "email": invite.email,
+            "token": str(invite.token),
+            "role": invite.role,
+            "expires_at": invite.expires_at,
+        }, status=201)
