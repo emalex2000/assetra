@@ -30,7 +30,7 @@ class CompanySerializer(serializers.ModelSerializer):
 
 class MyOrganisationSerializer(serializers.ModelSerializer):
     membersCount = serializers.SerializerMethodField()
-    assetCount = serializers.SerializerMethodField
+    assetsCount = serializers.SerializerMethodField()
     class Meta:
         model = Company
         fields = [
@@ -46,8 +46,8 @@ class MyOrganisationSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["company_id"]
 
-        def get_membersCount(self, obj):
+    def get_membersCount(self, obj):
             return obj.members.filter(is_active=True).count()
         
-        def get_assetsCount(self, obj):
+    def get_assetsCount(self, obj):
             return obj.assets.count()

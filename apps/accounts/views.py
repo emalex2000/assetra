@@ -5,18 +5,20 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.contrib.auth.password_validation import validate_password
-from .permissions import IsVerified, CanAssignAsset
+from .permissions import IsVerified, CanManageAsset
 from django.core.cache import cache
 # from django_ratelimit.decorators import ratelimit
 # from django.utils.decorators import method_decorator
 from .serializer import CompanySerializer, MyOrganisationSerializer
 from django.db import transaction
-from .models import OrganisationMember, Invite
+from .models import OrganisationMember, Invite, Company
 from rest_framework.exceptions import PermissionDenied
 from datetime import timedelta
 from django.utils import timezone
 import hashlib
-from django.contrib.auth import authenticate
+from rest_framework import generics, status
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.tokens import RefreshToken
 
 User = get_user_model()
 
@@ -65,6 +67,26 @@ class RegisterView(APIView):
 
         return Response({'message': f'otp sent to {email} '}, status=201)
 
+class LogoutView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        refresh_token = request.data.get("refresh")
+        if not refresh_token:
+            return Response({"error": "refresh token is required"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+            return Response( 
+                {"message": "logout successful"}, 
+                status=status.HTTP_200_OK
+                )
+        except TokenError:
+            return Response(
+                {"error":"invalid or expired refresh token"}, 
+                status=status.HTTP_400_BAD_REQUEST
+                )
+
 
 # @method_decorator(ratelimit(key='ip', rate='3/m', block=True), name='dispatch')
 class ResendOtpView(APIView):
@@ -85,9 +107,6 @@ class ResendOtpView(APIView):
 
         send_otp_email(email, otp)
         return Response({'Message': 'Otp sent successfully'}, status=200)
-    
-        
-    
 
         
 @api_view(['GET'])
@@ -137,6 +156,7 @@ class VerifyOtpView(APIView):
         return Response({'Message' : 'Account verified successfully'}, status=200)
     
 class CreateOrganisationView(APIView):
+    print("end point hit")
     permission_classes = [IsAuthenticated, IsVerified]
 
     def post(self, request):
@@ -163,13 +183,13 @@ class CreateOrganisationView(APIView):
 
             return Response({
                 "message": "Company created succesfully", 
-                "company": serializer.data
+                "company": CompanySerializer(company).data,
                 }, status=201)
         return Response(serializer.errors, status=400)
             
 
 class CreateInviteview(APIView):
-    permission_classes = [IsAuthenticated, IsVerified, CanAssignAsset]
+    permission_classes = [IsAuthenticated, IsVerified, CanManageAsset]
 
     def post(self, request):
         email = request.data.get("email")
@@ -202,13 +222,12 @@ class CreateInviteview(APIView):
         }, status=201)
     
 
-class MyOrganisationsView(APIView):
+class MyOrganisationsView(generics.ListAPIView):
+    serializer_class = MyOrganisationSerializer
     permission_classes = [IsAuthenticated, IsVerified]
 
-    def get(self, request):
-        memberships = OrganisationMember.objects.filter(
-            user=request.user, is_active=True
-            ).select_related("company")
-        companies = [memberships.company for membership in memberships if membership.company ]
-        serializer = MyOrganisationSerializer(companies, many=True)
-        return Response(serializer.data, status=200)
+    def get_queryset(self):
+        return Company.objects.filter(
+            members__user=self.request.user,
+            members__is_active=True,
+        ).distinct()

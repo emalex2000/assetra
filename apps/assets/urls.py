@@ -1,6 +1,6 @@
 from django.urls import path
-from .views import CreateAssetView, CreateCategoryView
+from .views import CreateAssetView, AssetCategoryListCreateView
 urlpatterns = [
-    path('create_asset', CreateAssetView.as_view(), name='create-asset'),
-    path('create_category', CreateCategoryView.as_view(), name='create-category'),
+    path('<uuid:organisationId>/create_asset/', CreateAssetView.as_view(), name='create-asset'),
+    path('<uuid:organisationId>/categories/', AssetCategoryListCreateView.as_view(), name='create-category'),
 ]

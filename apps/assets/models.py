@@ -49,8 +49,9 @@ class Asset(models.Model):
     location_country = CountryField(blank=True)
     history = HistoricalRecords()
     
-    class Meta:
-        unique_together = ["serial_number", "company"]
+    # class Meta:
+    #     unique_together = ["serial_number", "company"]
+
     def __str__(self):
         return f"{self.name} - {self.serial_number}"
     

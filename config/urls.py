@@ -12,7 +12,7 @@ urlpatterns = [
     
     path('admin/', admin.site.urls),
     path('api/accounts/', include("apps.accounts.urls")),
-    path('api/asset/', include('apps.assets.urls')),   
+    path('api/assets/', include('apps.assets.urls')),   
 
     path('api/token/', EmailTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),

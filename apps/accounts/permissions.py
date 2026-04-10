@@ -1,4 +1,5 @@
 from rest_framework.permissions import BasePermission
+from .models import OrganisationMember
 
 class IsVerified(BasePermission):
     def has_permission(self, request, view):
@@ -17,15 +18,24 @@ def get_user_membership(user, company_id):
     except OrganisationMember.DoesNotExist:
         return None
 
-class CanAssignAsset(BasePermission):
+class CanManageAsset(BasePermission):
+    message = "you do not have permission to manage asset for this organisation"
+
     def has_permission(self, request, view):
         user = request.user
-        company_id = request.headers.get("X-Company-ID") 
-
-        if not company_id:
+        if not user or not user.is_authenticated:
             return False
         
-        membership = get_user_membership(user, company_id)
-        if not membership:
+        company_id = view.kwargs.get("organisationId") 
+        if not company_id:
             return False
-        return membership.role in ["ADMIN", "STAFF"]
+
+        
+        membership = OrganisationMember.objects.filter(
+            user=user,
+            company_id=company_id,
+            is_active=True,
+            role__in=["ADMIN", "STAFF"]
+        ).first()
+
+        return membership is not None

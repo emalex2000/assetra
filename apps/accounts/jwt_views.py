@@ -2,4 +2,4 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from .jwt_serializer import EmailTokenObtainPairSerializer
 
 class EmailTokenObtainPairView(TokenObtainPairView):
-    serializer = EmailTokenObtainPairSerializer
+    serializer_class = EmailTokenObtainPairSerializer
