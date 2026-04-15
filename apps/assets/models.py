@@ -1,30 +1,12 @@
 from django.db import models
 from apps.accounts.models import Company, CustomUser
+from .model_choices import STATUS_CHOICES, CONDITION_CHOICES, ASSIGNMENT_STATUS, IMPORT_STATUS
 from simple_history.models import HistoricalRecords
 from django_countries.fields import CountryField
 import uuid
 
-STATUS_CHOICES = [
-    ("AVAILABLE", "Available"),
-    ("ASSIGNED", "Assigned"),
-    ("MAINTENANCE", "Maintenance"),
-    ("RETIRED", "Retired"),
-]
-
-CONDITION_CHOICES = [
-    ("NEW", "New"),
-    ("GOOD", "Good"),
-    ("DAMAGED", "Damaged"),
-    ("REPAIRED", "Repaired"),
-]
 
 
-ASSIGNMENT_STATUS = [
-    ("ACTIVE", "Active"),
-    ('RETURNED', "Returned"),
-    ("TRANSFERRED", "Transferred"),
-    ("OVERDUE", "Overdue"),
-]
 class AssetCategories(models.Model):
     category_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=200, null=True)
@@ -38,7 +20,7 @@ class AssetCategories(models.Model):
 class Asset(models.Model):
     asset_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=200, null=True)
-    serial_number = models.CharField(max_length=250, unique=True, null=True)
+    serial_number = models.CharField(max_length=250, null=True, blank=True)
     model = models.CharField(max_length=250, null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="AVAILABLE")
     condition = models.CharField(max_length=20, choices=CONDITION_CHOICES, default="GOOD")
@@ -49,8 +31,8 @@ class Asset(models.Model):
     location_country = CountryField(blank=True)
     history = HistoricalRecords()
     
-    # class Meta:
-    #     unique_together = ["serial_number", "company"]
+    class Meta:
+        unique_together = ["serial_number", "company"]
 
     def __str__(self):
         return f"{self.name} - {self.serial_number}"
@@ -85,3 +67,40 @@ class AssetTransfer(models.Model):
 
     def __str__(self):
         return f"{self.asset} {self.from_user} -> {self.to_user}"
+
+
+class AssetImportSession(models.Model):
+    import_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="asset_imports")
+    uploaded_by = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True)
+    original_file = models.FileField(upload_to="asset_imports/")
+    original_filename = models.CharField(max_length=255)
+    status = models.CharField(max_length=30, choices=IMPORT_STATUS, default="UPLOADED")
+    total_rows = models.PositiveIntegerField(default=0)
+    valid_rows = models.PositiveIntegerField(default=0)
+    invalid_rows = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class AssetImportColumnMapping(models.Model):
+    session = models.ForeignKey(AssetImportSession, on_delete=models.CASCADE, related_name="column_mappings")
+    source_column = models.CharField(max_length=255)
+    target_field = models.CharField(max_length=255, null=True, blank=True)
+    is_skipped = models.BooleanField(default=False)
+
+    class Meta:
+        unique_together = ("session", "source_column")
+
+
+class AssetImportRow(models.Model):
+    session = models.ForeignKey(AssetImportSession, on_delete=models.CASCADE, related_name="rows")
+    row_number = models.PositiveIntegerField(default=0)
+    raw_data = models.JSONField(default=dict)
+    normalized_data = models.JSONField(default=dict)
+    is_valid = models.BooleanField(default=False)
+    errors = models.JSONField(default=list)
+    imported_assets = models.ForeignKey("assets.Asset", on_delete=models.SET_NULL, null=True, related_name="import_rows")
+
+    class Meta:
+        unique_together = ["session", "row_number"]

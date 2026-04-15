@@ -15,10 +15,10 @@ DATABASES = {
         'PORT': '5433',
     }
 }
-CACHES = {
-    "default":{
-        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-        # "LOCATION": "ratelimit_cache_table",
-    }
-}
+# CACHES = {
+#     "default":{
+#         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+#         # "LOCATION": "ratelimit_cache_table",
+#     }
+# }
 CORS_ALLOW_ALL_ORIGINS = True

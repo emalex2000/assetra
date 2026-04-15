@@ -39,7 +39,7 @@ INSTALLED_APPS = [
     'dj_rest_auth',
     'dj_rest_auth.registration',
     'django_countries',
-    # 'django_ratelimit',
+    'django_ratelimit',
 
     #local apps
     'apps.assets',
@@ -163,7 +163,6 @@ SIMPLE_JWT = {
 SITE_ID = 1
 
 
-
 SPECTACULAR_SETTINGS = {
     "TITLE": "Asset tracker API",
     "DESCRIPTION":"API documentation for the asset tracking sysem",
@@ -188,3 +187,20 @@ USE_TZ = True
 STATIC_URL = 'static/'
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+
+USE_REDIS_CACHE = config("USE_REDIS_CACHE", cast=bool, default=False)
+REDIS_URL = config('UPSTASH_REDIS_URL', default="")
+
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": REDIS_URL,
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "IGNORE_EXCEPTIONS": True,
+        },
+        "KEY_PREFIX": "assetra",
+        "TIMEOUT": 300,
+    }
+}
