@@ -2,7 +2,7 @@ from collections import Counter
 
 from django_countries import countries
 
-from apps.assets.constants import SUPPORTED_IMPORT_FIELDS
+from apps.assets.constants import SUPPORTED_IMPORT_FIELDS, COUNTRY_ALIASES
 from apps.assets.models import Asset, AssetCategories
 
 
@@ -38,7 +38,6 @@ def resolve_country(value, code_lookup, name_lookup):
         return None, None
 
     value = str(value).strip()
-
     if not value:
         return None, None
 
@@ -48,11 +47,13 @@ def resolve_country(value, code_lookup, name_lookup):
     if upper_value in code_lookup:
         return code_lookup[upper_value], None
 
+    if lower_value in COUNTRY_ALIASES:
+        return COUNTRY_ALIASES[lower_value], None
+
     if lower_value in name_lookup:
         return name_lookup[lower_value], None
 
     return None, f"'{value}' is not a valid country."
-
 
 def validate_import_rows(import_session):
     """

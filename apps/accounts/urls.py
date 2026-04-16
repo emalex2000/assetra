@@ -6,7 +6,11 @@ from .views import (
     ResendOtpView, 
     CreateOrganisationView,
     MyOrganisationsView,
-    LogoutView
+    OrganisationSearchView,
+    CreateJoinRequestView,
+    OrganisationJoinRequestListView,
+    ReviewJoinRequestView,
+    LogoutView,
     )
 
 urlpatterns = [
@@ -17,4 +21,10 @@ urlpatterns = [
     path('resend-otp/', ResendOtpView.as_view(), name='resend_otp'),
     path('create-company/', CreateOrganisationView.as_view(), name='add_company'),
     path('my-organisations/', MyOrganisationsView.as_view(), name='my_organisations'),
+    path('organisation_search/', OrganisationSearchView.as_view(), name='organisation-search'),
+    path('organisations_search', OrganisationSearchView.as_view(), name='organisation-search'),
+    #used company_id for uuid because its not under CanManageAsset permission
+    path('organisation/<uuid:company_id>/join', CreateJoinRequestView.as_view(), name='join-request'),
+    path('organisation/<uuid:organisationId>/join-requests/', OrganisationJoinRequestListView.as_view(), name='join_requests'),
+    path('organisation/<uuid:organisationId>/join-requests/<uuid:request_id>/review', ReviewJoinRequestView.as_view(), name='review')
 ]

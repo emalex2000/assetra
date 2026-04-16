@@ -1,6 +1,20 @@
 from rest_framework import serializers
 from .models import Asset, AssetCategories, AssetAssignment
 from .constants import SUPPORTED_IMPORT_FIELDS
+from django_countries import countries
+
+
+def validate_location_country(self, value):
+    # If already a valid code, return
+    if value in dict(countries):
+        return value
+
+    # Try matching by name
+    for code, name in countries:
+        if name.lower() == str(value).lower():
+            return code
+
+    raise serializers.ValidationError("Invalid country")
 
 
 class AssetSerializer(serializers.ModelSerializer):

@@ -7,11 +7,18 @@ from rest_framework.views import APIView
 from django.contrib.auth.password_validation import validate_password
 from .permissions import IsVerified, CanManageAsset
 from django.core.cache import cache
-# from django_ratelimit.decorators import ratelimit
-# from django.utils.decorators import method_decorator
-from .serializer import CompanySerializer, MyOrganisationSerializer
+from django_ratelimit.decorators import ratelimit
+from django.utils.decorators import method_decorator
+from .serializer import (
+    CompanySerializer, 
+    MyOrganisationSerializer, 
+    OrganisationSearchSerializer,
+    JoinRequestSerializer,
+    JoinRequestListSerializer,
+    JoinRequestReviewSerializer,
+    )
 from django.db import transaction
-from .models import OrganisationMember, Invite, Company
+from .models import OrganisationMember, Invite, Company, JoinRequest
 from rest_framework.exceptions import PermissionDenied
 from datetime import timedelta
 from django.utils import timezone
@@ -19,6 +26,8 @@ import hashlib
 from rest_framework import generics, status
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
+from django.shortcuts import get_object_or_404
+
 
 User = get_user_model()
 
@@ -27,7 +36,7 @@ def normalize_email(email:str) -> str:
 
 
 
-# @method_decorator(ratelimit(key='ip', rate='5/m', block=True), name='dispatch')
+@method_decorator(ratelimit(key='ip', rate='5/m', block=True), name='dispatch')
 class RegisterView(APIView):
     permission_classes = []
     def post(self, request):
@@ -88,7 +97,7 @@ class LogoutView(APIView):
                 )
 
 
-# @method_decorator(ratelimit(key='ip', rate='3/m', block=True), name='dispatch')
+@method_decorator(ratelimit(key='ip', rate='3/m', block=True), name='dispatch')
 class ResendOtpView(APIView):
     permission_classes = []
 
@@ -120,7 +129,7 @@ def current_user(request):
     )
 
 
-# @method_decorator(ratelimit(key='ip', rate='10/m', block=True), name='dispatch')
+@method_decorator(ratelimit(key='ip', rate='10/m', block=True), name='dispatch')
 class VerifyOtpView(APIView):
     permission_classes = []
     def post(self, request):
@@ -156,7 +165,6 @@ class VerifyOtpView(APIView):
         return Response({'Message' : 'Account verified successfully'}, status=200)
     
 class CreateOrganisationView(APIView):
-    print("end point hit")
     permission_classes = [IsAuthenticated, IsVerified]
 
     def post(self, request):
@@ -231,3 +239,109 @@ class MyOrganisationsView(generics.ListAPIView):
             members__user=self.request.user,
             members__is_active=True,
         ).distinct()
+    
+
+
+class OrganisationSearchView(generics.ListAPIView):
+    serializer_class = OrganisationSearchSerializer
+    permission_classes = [IsAuthenticated, IsVerified]
+
+    def get_queryset(self):
+        query = self.request.query_params.get("q", "").strip()
+        queryset = Company.objects.all()
+
+        if query:
+            queryset = queryset.filter(name__icontains=query)
+
+        return queryset.order_by("name")
+    
+
+class CreateJoinRequestView(APIView):
+    permission_classes = [IsAuthenticated, IsVerified]
+
+    def post(self, request, company_id):
+        company = get_object_or_404(Company, company_id=company_id)
+        existing_membership = OrganisationMember.objects.filter(
+            user=request.user,
+            company=company,
+            is_active=True,
+        ).exists()
+
+        if existing_membership:
+            return Response(
+                {"error": "you are already a member of this organisation"},status=400)
+        
+        existing_request = JoinRequest.objects.filter(
+            user=request.user,
+            company=company,
+            status="PENDING",
+        ).exists()
+
+        if existing_request:
+            return Response({"error": "you already have a pending request"}, status=400)
+        
+        serializer = JoinRequestSerializer(data=request.data)
+        serializer.is_valid=True
+
+        join_request = JoinRequest.objects.create(
+            user=request.user,
+            company=company,
+            status="PENDING",
+        )
+        return Response(
+            {
+                "message": "join request sent successfully",
+                "request": JoinRequestListSerializer(join_request).data,
+                }, status=201)
+    
+
+class OrganisationJoinRequestListView(generics.ListAPIView):
+    serializer_class = JoinRequestListSerializer
+    permission_classes = [IsAuthenticated, IsVerified, CanManageAsset]
+
+    def get_queryset(self):
+        company_id = self.kwargs.get("organisationId")
+        return JoinRequest.onjects.filter(
+            company_id=company_id,
+            status="PENDING",
+        ).select_related("user", "company").order_by("-created_at")
+    
+
+class ReviewJoinRequestView(APIView):
+    permission_classes = [IsAuthenticated, IsVerified, CanManageAsset]
+
+    def post(self, request, organisation_id, request_id):
+        company = get_object_or_404(Company, company_id=organisation_id)
+        join_request = get_object_or_404(JoinRequest, request_id=request_id, company=company, status="PENDING")
+
+        serializer = JoinRequestReviewSerializer
+        serializer.is_valid(raise_exception=True)
+
+        action = serializer.validated_data["action"]
+
+        if action == "APPROVE":
+            membership_exists = OrganisationMember.objects.filter(
+                user=join_request.user,
+                company=company,
+            ).exists()
+
+            if not membership_exists:
+                OrganisationMember.objects.create(
+                    user=join_request.user,
+                    company=company,
+                    role="RECIPIENT",
+                    is_active=True
+                )
+
+            join_request.status = "APPROVED"
+            join_request.reviewed_by = request.user
+            join_request.reviewed_at = timezone.now()
+            join_request.save()
+            
+            return Response({"message": "join request approved successfully"}, status=200,)
+        join_request.status = "REJECTED"
+        join_request.reviewed_by = request.user
+        join_request.reviewed_at = timezone.now()
+        join_request.save()
+
+        return Response({"message": "join request rejected successfully"}, status=200)

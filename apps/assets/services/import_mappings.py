@@ -1,13 +1,9 @@
-from openpyxl import load_workbook
-from datetime import datetime, date, time
+from datetime import date, datetime, time
 from decimal import Decimal
+from openpyxl import load_workbook
 
 
 def make_json_safe(value):
-    """
-    Convert Excel/python values into JSON-safe primitives
-    before saving into JSONField.
-    """
     if value is None:
         return None
 
@@ -32,10 +28,6 @@ def normalize_cell_value(value):
 
 
 def build_normalized_rows(file_obj, mappings):
-    """
-    Reads the first sheet and applies source-column -> target-field mappings.
-    Returns normalized rows ready to store in AssetImportRow.
-    """
     workbook = load_workbook(file_obj, read_only=True, data_only=True)
     worksheet = workbook.worksheets[0]
     rows = worksheet.iter_rows(values_only=True)
@@ -47,7 +39,6 @@ def build_normalized_rows(file_obj, mappings):
         return []
 
     headers = [str(cell).strip() if cell is not None else "" for cell in header_row]
-
     normalized_rows = []
 
     for index, row in enumerate(rows, start=2):

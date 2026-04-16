@@ -5,7 +5,7 @@ from .models import CustomUser
 from django.contrib.auth import get_user_model
 from phonenumber_field.serializerfields import PhoneNumberField
 from rest_framework import serializers
-from .models import Company
+from .models import Company, JoinRequest
 
 User = get_user_model()
 
@@ -51,3 +51,43 @@ class MyOrganisationSerializer(serializers.ModelSerializer):
         
     def get_assetsCount(self, obj):
             return obj.assets.count()
+    
+
+class OrganisationSearchSerializer(serializers.ModelSerializer):
+     class Meta:
+          model = Company
+          fields = [
+               "company_id",
+               "name",
+               "country",
+               "industry",
+          ]
+
+    
+class JoinRequestSerializer(serializers.ModelSerializer):
+     class Meta:
+          model = JoinRequest
+          fields = ["request_id"]
+          read_only_fields = ["request_id"]
+
+
+class JoinRequestListSerializer(serializers.ModelSerializer):
+     user_id = serializers.UUIDField(source="user.id", read_only=True)
+     email = serializers.EmailField(source="user.email", read_only=True)
+     phone_number = serializers.CharField(source="user.phone_number", read_only=True)
+
+     class Meta:
+        model = JoinRequest
+        fields = [
+            "request_id",
+            "user_id",
+            "email",
+            "phone_number",
+            "status",
+            "created_at",
+        ]
+
+
+class JoinRequestReviewSerializer(serializers.Serializer):
+    action = serializers.ChoiceField(choices=["approved", "reject"])
+     

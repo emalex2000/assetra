@@ -5,12 +5,8 @@ from django_countries.fields import CountryField
 from phonenumber_field.modelfields import PhoneNumberField
 from django.utils import timezone
 from datetime import timedelta
+from . import choices
 
-ROLE_CHOICES = [
-    ("ADMIN", "Admin"),
-    ("STAFF","Staff"),
-    ("RECIPIENT", "Recipient"),
-]
 
 def invite_expiry():
     return timezone.now() + timedelta(days=2)
@@ -71,6 +67,8 @@ class Company(models.Model):
     company_logo = models.ImageField(upload_to=company_logo_upload_path, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     owner = models.ForeignKey(CustomUser, on_delete=models.CASCADE, null=True, related_name="owned_companies")
+    is_listed = models.BooleanField(default=True)
+    allow_join_request = models.BooleanField(default=True)
     
     def __str__(self):
         return self.name
@@ -79,7 +77,7 @@ class Company(models.Model):
 class OrganisationMember(models.Model):
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="membership")
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="members", null=True, blank=True)
-    role = models.CharField(max_length=200, choices=ROLE_CHOICES, default="ADMIN")
+    role = models.CharField(max_length=200, choices=choices.ROLE_CHOICES, default="ADMIN")
     is_active = models.BooleanField(default=True)
     joined_at = models.DateTimeField(auto_now_add=True)
 
@@ -90,8 +88,21 @@ class OrganisationMember(models.Model):
 class Invite(models.Model):
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
     email = models.EmailField()
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    role = models.CharField(max_length=20, choices=choices.ROLE_CHOICES)
     token = models.UUIDField(default=uuid.uuid4, unique=True)
 
     expires_at = models.DateTimeField(default=invite_expiry)
     accepted = models.BooleanField(default=False)
+
+
+class JoinRequest(models.Model):
+    request_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="join_requests")
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="join_requests")
+    status = models.CharField(max_length=50, choices=choices.REQUEST_CHOICES, default="PENDING")
+    created_at = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name="reviewd_join_request")
+
+    class Meta:
+        unique_together = ["user", "company"]
