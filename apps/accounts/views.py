@@ -16,6 +16,7 @@ from .serializer import (
     JoinRequestSerializer,
     JoinRequestListSerializer,
     JoinRequestReviewSerializer,
+    OrganisationSearchResultSerializer,
     )
 from django.db import transaction
 from .models import OrganisationMember, Invite, Company, JoinRequest
@@ -33,7 +34,6 @@ User = get_user_model()
 
 def normalize_email(email:str) -> str:
     return email.strip().lower()
-
 
 
 @method_decorator(ratelimit(key='ip', rate='5/m', block=True), name='dispatch')
@@ -243,18 +243,18 @@ class MyOrganisationsView(generics.ListAPIView):
 
 
 class OrganisationSearchView(generics.ListAPIView):
-    serializer_class = OrganisationSearchSerializer
+    serializer_class = OrganisationSearchResultSerializer
     permission_classes = [IsAuthenticated, IsVerified]
 
     def get_queryset(self):
         query = self.request.query_params.get("q", "").strip()
-        queryset = Company.objects.all()
+        queryset = Company.objects.filter(is_listed=True)
 
         if query:
             queryset = queryset.filter(name__icontains=query)
 
         return queryset.order_by("name")
-    
+
 
 class CreateJoinRequestView(APIView):
     permission_classes = [IsAuthenticated, IsVerified]
@@ -280,9 +280,10 @@ class CreateJoinRequestView(APIView):
         if existing_request:
             return Response({"error": "you already have a pending request"}, status=400)
         
-        serializer = JoinRequestSerializer(data=request.data)
-        serializer.is_valid=True
-
+        if not company.allow_join_request:
+            return Response(
+                {"error":" this company does not allow join request"}, status=403
+            )
         join_request = JoinRequest.objects.create(
             user=request.user,
             company=company,
@@ -301,7 +302,7 @@ class OrganisationJoinRequestListView(generics.ListAPIView):
 
     def get_queryset(self):
         company_id = self.kwargs.get("organisationId")
-        return JoinRequest.onjects.filter(
+        return JoinRequest.objects.filter(
             company_id=company_id,
             status="PENDING",
         ).select_related("user", "company").order_by("-created_at")
@@ -310,16 +311,15 @@ class OrganisationJoinRequestListView(generics.ListAPIView):
 class ReviewJoinRequestView(APIView):
     permission_classes = [IsAuthenticated, IsVerified, CanManageAsset]
 
-    def post(self, request, organisation_id, request_id):
-        company = get_object_or_404(Company, company_id=organisation_id)
+    def post(self, request, organisationId, request_id):
+        company = get_object_or_404(Company, company_id=organisationId)
         join_request = get_object_or_404(JoinRequest, request_id=request_id, company=company, status="PENDING")
 
-        serializer = JoinRequestReviewSerializer
+        serializer = JoinRequestReviewSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
         action = serializer.validated_data["action"]
 
-        if action == "APPROVE":
+        if action == "APPROVED":
             membership_exists = OrganisationMember.objects.filter(
                 user=join_request.user,
                 company=company,
@@ -332,16 +332,19 @@ class ReviewJoinRequestView(APIView):
                     role="RECIPIENT",
                     is_active=True
                 )
-
             join_request.status = "APPROVED"
-            join_request.reviewed_by = request.user
-            join_request.reviewed_at = timezone.now()
-            join_request.save()
-            
-            return Response({"message": "join request approved successfully"}, status=200,)
-        join_request.status = "REJECTED"
+
+        elif action=="REJECTED":
+            join_request.status = "REJECTED"
         join_request.reviewed_by = request.user
         join_request.reviewed_at = timezone.now()
         join_request.save()
+            
+        return Response({
+            "message": f"join request {join_request.status.lower()} successfully",
+            "request": JoinRequestListSerializer(join_request).data
+            }, status=200,)
+        
+        
 
-        return Response({"message": "join request rejected successfully"}, status=200)
+        

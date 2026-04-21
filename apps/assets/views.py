@@ -5,21 +5,27 @@ from rest_framework.response import Response
 from .serializers import (
     AssetSerializer, 
     AssetCategorySerializer, 
-    AssetAssignmentSerializer, 
+    AssetAssignmentCreateSerializer, 
     AssetListSerializer, 
     AssetImportUploadSerializer,
     AssetImportMappingSerializer,
+    AssignableUserSerializer,
+    AssignableAssetSerializer,
+    AssetTransferSerializer,
 )
+from datetime import date
 from rest_framework.generics import CreateAPIView, ListCreateAPIView, ListAPIView
 from rest_framework.views import APIView
 from rest_framework.exceptions import PermissionDenied, NotFound
-from apps.accounts.models import Company, OrganisationMember
+from apps.accounts.models import Company, OrganisationMember 
 from .import_parser import extract_excel_metadata
 from apps.assets.services.import_mappings import build_normalized_rows
 from apps.assets.services.import_validation import validate_import_rows
 from apps.assets.services.import_commit import commit_import_rows
 from rest_framework import status
-from .models import AssetImportColumnMapping, AssetImportRow
+from django.db import transaction
+from django.db.models import Q
+from .models import AssetImportColumnMapping, AssetImportRow, AssetTransfer
 
 
 class CreateAssetView(CreateAPIView):
@@ -324,28 +330,247 @@ class AssetImportCommitView(APIView):
         return Response(result, status=status.HTTP_200_OK)
     
     
-class AssetAssigmentView(CreateAPIView):
-    serializer_class = AssetAssignmentSerializer
+class CreateAssetAssigmentView(CreateAPIView):
+    serializer_class = AssetAssignmentCreateSerializer
     permission_classes = [IsAuthenticated, IsVerified, CanManageAsset]
 
-    def perform_create(self, serializer):
-        user = self.request.user
-        if not user.company:
-            raise PermissionDenied("must belong to a company")
+    def get_company(self):
+        organisation_id = self.kwargs.get("organisationId")
+        try:
+            company = Company.objects.get(company_id=organisation_id)
+        except Company.DoesNotExist:
+            raise NotFound("the company does not exist")
+
+        is_member = OrganisationMember.objects.filter(
+            user=request.user,
+            company=company,
+            is_active=True
+        ).exists()
+
+        if not is_member:
+            raise PermissionDenied("you do not have permission to assign items in this organisation")
+
+        return company
+
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        company["company"] = self.get_company()
+        return company
+
     
+    @transaction.atomic
+    def perform_create(self, serializer):
         asset = serializer.validated_data.get("asset")
         assignee = serializer.validated_data.get("user")
 
-        if asset.company != user.company:
-            raise PermissionDenied("Asset does not belong to your company")
-        
-        if assignee.company != user.company:
-            raise PermissionDenied("User does not belong to your company")
-        
-        if asset.status != "AVAILABLE":
-            raise PermissionDenied("Asset is not available")
-        
-        assignment = serializer.save(assigned_by=user)
+        assignment = serializer.save(assigned_by=self.request.user, status="ACTIVE", received=False)
         asset.status = "ASSIGNED"
         asset.current_holder = assignee
-        asset.save()
+        asset.location_country = assignment.location_country
+        asset.save(updated_fields=["status", "current_holder", "location_country"])
+
+
+class AssignableUsersView(ListAPIView):
+    serializer_class = AssignableUserSerializer
+    permission_classes = [IsAuthenticated, IsVerified, CanManageAsset]
+
+    def get_company(self):
+        organisation_id = self.kwargs.get("organisationId")
+
+        try:
+            company = Company.objects.filter(company_id=organisation_id)
+        except Company.DoesNotExist:
+            raise NotFound("organisation does not exist")
+
+        is_member = OrganisationMember.objects.filter(
+            user=self.request.user,
+            company=company,
+            is_active=True,
+            role__in=["ADMIN", "STAFF"]
+        ).exists()
+
+        if not is_member:
+            raise PermissionDenied("you do not have permission to view assignable users")
+
+        return company
+
+
+    def get_queryset(self):
+        company=self.get_company()
+        query = self.request.query_params.get("q", "").strip()
+
+        queryset = OrganisationMember.objects.get(
+            company=company,
+            is_active=True,
+            user__is_active=True,
+        ).select_related("user").order_by("user__email")
+
+        if query:
+            queryset = queryset.filter(
+                Q(user__email__icontains=query) |
+                Q(user__phone_number__icontains=query) |
+                Q(role__icontains=query)
+            )
+
+        return queryset
+
+
+class AssignableAssetsView(ListAPIView):
+    serializers = AssignableAssetSerializer
+    permission_classes = [IsAuthenticated, IsVerified, CanManageAsset]
+
+    def get_company(self):
+        organisation_id = self.kwargs.get("organisationId")
+
+        try:
+            company = Company.objects.filter(company_id=organisation_id)
+        except Company.DoesNotExist:
+            raise NotFound("company does not exist")
+
+        is_member = OrganisationMember.objects.filter(
+            user=request.user,
+            company=company,
+            is_active=True,
+            role__in=["ADMIN", "STAFF"]
+        ).exists()
+
+        if not is_member:
+            raise PermissionDenied("you do not have permission to view these assets")
+
+        return company
+
+    def get_querset(self):
+        company = self.get_company()
+        query = self.request.query_params.get("q", "").strip()
+        include_assigned = self.request.query_params.get("include_assigned", "false").lower() == "true"
+
+        queryset = Asset.objects.filter(company=company).select_related(
+            "category", "current_holder"
+        ).order_by("name")
+
+        if not include_assigned:
+            queryset = queryset.filter(status="AVAILABLE", current_holder__isnull=True,)
+
+        if quer:
+            queryset = queryset.filter(
+                Q(name__icontains=query) |
+                Q(serial_number__icontains=query) |
+                Q(model__icontains=query) |
+                Q(category__name__icontains=query) 
+            )
+
+        return queryset
+
+
+class AssetTransferView(APIView):
+    permission_classes = [IsAuthenticated, IsVerified, CanManageAsset]
+
+    def get_company(self):
+        organisation_id = self.kwargs.get("organisationId")
+
+        try:
+            company = Company.objects.get(company_id=organisation_id)
+        except Company.DoesNotExist:
+            raise NotFound("Company not found.")
+
+        is_member = OrganisationMember.objects.filter(
+            user=self.request.user,
+            company=company,
+            is_active=True,
+            role__in=["ADMIN", "STAFF"],
+        ).exists()
+
+        if not is_member:
+            raise PermissionDenied("You do not have permission to transfer assets in this organisation.")
+
+        return company
+
+    @transaction.atomic
+    def post(self, request, *args, **kwargs):
+        company = self.get_company()
+        serializer = AssetTransferSerializer(
+            data=request.data,
+            context={"company": company}
+        )
+        serializer.is_valid(raise_exception=True)
+
+        asset = serializer.validated_data["asset_obj"]
+        to_user = serializer.validated_data["to_user_obj"]
+        active_assignment = serializer.validated_data["active_assignment"]
+        location_country = serializer.validated_data["location_country"]
+        notes = serializer.validated_data.get("notes", "")
+
+        from_user = active_assignment.user
+
+        active_assignment.status = "TRANSFERRED"
+        active_assignment.save(update_fields=["status"])
+
+        transfer = AssetTransfer.objects.create(
+            asset=asset,
+            from_user=from_user,
+            to_user=to_user,
+            location_country=location_country,
+            created_by=request.user,
+        )
+
+        new_assignment = AssetAssignment.objects.create(
+            asset=asset,
+            user=to_user,
+            assigned_by=request.user,
+            date_assigned=date.today(),
+            location_country=location_country,
+            status="ACTIVE",
+            received=False,
+            notes=notes,
+        )
+
+        asset.current_holder = to_user
+        asset.status = "ASSIGNED"
+        asset.location_country = location_country
+        asset.save(update_fields=["current_holder", "status", "location_country"])
+
+        return Response(
+            {
+                "detail": "Asset transferred successfully.",
+                "transfer_id": str(transfer.transfer_id),
+                "assignment_id": str(new_assignment.assignment_id),
+                "pending_receive": True,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AssetReceivedView(APIView):
+    permission_classes = [IsAuthenticated, IsVerified, CanManageAsset]
+
+    @transaction.atomic
+    def post(self, request, *args, **kwargs):
+        serializer = AssetReceivedSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        assignment_id = serializer.validated_data["assignment_id"]
+
+        try:
+            assignment = AssetAssignment.objects.select_related("asset", "user").get(
+                assignment_id=assignment_id,
+                user=request.user,
+                status="ACTIVE"
+            )
+
+        except Assignment.DoesNotExist:
+            raise NotFound("active assignment not found for this user")
+
+        if assignment.received:
+            return Response(
+                {"detail":"asset already marked as received"}, status=400
+            )
+
+        assignment.received = True
+        assignment.save(updated_fields=["received"])
+        return Response({
+            "detail": "asset marked as received",
+            "assignment_id": str(assignment.assignment_id),
+            "asset_id": str(assignment.asset.asset_id),
+            "received": True
+        }, status=200)

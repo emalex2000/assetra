@@ -89,5 +89,36 @@ class JoinRequestListSerializer(serializers.ModelSerializer):
 
 
 class JoinRequestReviewSerializer(serializers.Serializer):
-    action = serializers.ChoiceField(choices=["approved", "reject"])
+    action = serializers.ChoiceField(choices=["APPROVED", "REJECTED"])
+
+
+
+class OrganisationSearchResultSerializer(serializers.ModelSerializer):
+    is_member = serializers.SerializerMethodField()
+    has_pending_request = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Company
+        fields = [
+            "company_id",
+            "name",
+            "country",
+            "industry",
+            "company_logo",
+            "allow_join_request",
+            "is_member",
+            "has_pending_request",
+        ]
+
+    def get_is_member(self, obj):
+        user = self.context["request"].user
+        return obj.members.filter(user=user, is_active=True).exists()
+
+    def get_has_pending_request(self, obj):
+        user = self.context["request"].user
+        return obj.join_requests.filter(user=user, status="PENDING").exists()
+
+
+class AcceptAssetSerializer(serializers.ModelSerializer):
+    pass
      
