@@ -12,6 +12,7 @@ from .views import (
     AssetTransferView,
     AssignableAssetsView,
     AssetReceivedView,
+    OrganisationAssignmentListView,
     )
 
 urlpatterns = [
@@ -21,9 +22,10 @@ urlpatterns = [
     
     path('<uuid:organisationId>/assigments/create/', CreateAssetAssigmentView.as_view(), name="create_assignment"),
     path('<uuid:organisationId>/assignments/transfer/', AssetTransferView.as_view(), name='transfer'),
-    path('<uuid:organisationId>/assignable-users', AssignableUsersView.as_view(), name='assignable_users'),
+    path('<uuid:organisationId>/assignable-users/', AssignableUsersView.as_view(), name='assignable_users'),
     path('<uuid:organisationId>/assignable-assets/', AssignableAssetsView.as_view(), name='assignable_assets'),
-    path('assignments/received', AssetReceivedView.as_view(), name='asset_received'),
+    path('assignments/received/', AssetReceivedView.as_view(), name='asset_received'),
+    path('<uuid:organisationId>/assignments/', OrganisationAssignmentListView.as_view(), name='assignment_list'),
 
     path('<uuid:organisationId>/imports/upload/', AssetImportUploadView.as_view(), name='upload'),
     path('<uuid:organisationId>/imports/<uuid:importId>/map/', AssetImportMappingView.as_view(), name='import_mapping'),

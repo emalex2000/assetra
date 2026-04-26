@@ -151,48 +151,48 @@ class AssetAssignmentCreateSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["assignment_id"]
 
-        def validate_asset(self, value):
-            company = self.context["company"]
+    def validate_asset(self, value):
+        company = self.context["company"]
 
-            if value.company != company:
-                raise serializers.ValidationError("this asset does not belong to this organisation")
+        if value.company != company:
+            raise serializers.ValidationError("this asset does not belong to this organisation")
             
-            if value.status != "AVAILABLE":
-                raise serializers.ValidationError("this asset is not available for assignment")
+        if value.status != "AVAILABLE":
+            raise serializers.ValidationError("this asset is not available for assignment")
 
-            if value.current_holder is not None:
-                raise serializers.ValidationError("this asset already belongs to someone else")
+        if value.current_holder is not None:
+            raise serializers.ValidationError("this asset already belongs to someone else")
             
-            active_assignment_exists = AssetAssignment.objects.filter(
-                status="ACTIVE",
-                asset=value
-            ).exists()
+        active_assignment_exists = AssetAssignment.objects.filter(
+            status="ACTIVE",
+            asset=value
+        ).exists()
 
-            if active_assignment_exists:
-                raise serializers.ValidationError("an active assignment already exists with this assset")
+        if active_assignment_exists:
+            raise serializers.ValidationError("an active assignment already exists with this assset")
             
-            return value
+        return value
         
-        def validate_user(self, value):
-            company = self.context["company"]
-            is_member = OrganisationMember.objects.filter(
-                company=company,
-                user=value,
-                is_active=True,
-            ).exists()
+    def validate_user(self, value):
+        company = self.context["company"]
+        is_member = OrganisationMember.objects.filter(
+            company=company,
+            user=value,
+            is_active=True,
+        ).exists()
 
-            if not is_member:
-                raise serializers.ValidationError("user is not an active member of this organisation")
+        if not is_member:
+            raise serializers.ValidationError("user is not an active member of this organisation")
             
-            return value
+        return value
 
-        def validate(self, attrs):
-            asset = attrs.get("asset")
-            user = attrs.get("user")
+    def validate(self, attrs):
+        asset = attrs.get("asset")
+        user = attrs.get("user")
 
-            if asset and user and asset.current_holder == user:
-                raise serializers.ValidationError("asset alread belong to this user")
-            return attrs
+        if asset and user and asset.current_holder == user:
+            raise serializers.ValidationError("asset alread belong to this user")
+        return attrs
 
 
 class AssignableUserSerializer(serializers.ModelSerializer):
@@ -289,3 +289,29 @@ class AssetTransferSerializer(serializers.Serializer):
 
 class AssetReceivedSerializer(serializers.Serializer):
     assignment_id = serializers.UUIDField()
+
+
+class AssetAssignmentListSerializer(serializers.ModelSerializer):
+    asset_name = serializers.CharField(source="asset.name", read_only=True)
+    user_email = serializers.EmailField(source="user.email", read_only=True)
+    location = serializers.SerializerMethodField()
+    received_status = serializers.SerializerMethodField()
+    date_assigned = serializers.DateField(read_only=True)
+
+    class Meta:
+        model = AssetAssignment
+        fields = [
+            "assignment_id",
+            "asset_name",
+            "location",
+            "status",
+            "received_status",
+            "user_email",
+            "date_assigned",
+        ]
+
+    def get_location(self, obj):
+        return obj.get_location_country_display() or obj.location_country
+
+    def get_received_status(self, obj):
+        return "RECEIVED" if obj.received else "PENDING"

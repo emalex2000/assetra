@@ -1,8 +1,10 @@
-from .models import Asset, AssetCategories, AssetImportSession
+from .models import Asset, AssetAssignment, AssetCategories, AssetImportSession
 from rest_framework.permissions import IsAuthenticated
 from apps.accounts.permissions import IsVerified, CanManageAsset
 from rest_framework.response import Response
 from .serializers import (
+    AssetAssignmentListSerializer,
+    AssetReceivedSerializer,
     AssetSerializer, 
     AssetCategorySerializer, 
     AssetAssignmentCreateSerializer, 
@@ -26,7 +28,7 @@ from rest_framework import status
 from django.db import transaction
 from django.db.models import Q
 from .models import AssetImportColumnMapping, AssetImportRow, AssetTransfer
-
+from rest_framework.pagination import PageNumberPagination
 
 class CreateAssetView(CreateAPIView):
     serializer_class = AssetSerializer
@@ -342,7 +344,7 @@ class CreateAssetAssigmentView(CreateAPIView):
             raise NotFound("the company does not exist")
 
         is_member = OrganisationMember.objects.filter(
-            user=request.user,
+            user=self.request.user,
             company=company,
             is_active=True
         ).exists()
@@ -355,8 +357,8 @@ class CreateAssetAssigmentView(CreateAPIView):
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
-        company["company"] = self.get_company()
-        return company
+        context["company"] = self.get_company()
+        return context
 
     
     @transaction.atomic
@@ -368,7 +370,7 @@ class CreateAssetAssigmentView(CreateAPIView):
         asset.status = "ASSIGNED"
         asset.current_holder = assignee
         asset.location_country = assignment.location_country
-        asset.save(updated_fields=["status", "current_holder", "location_country"])
+        asset.save(update_fields=["status", "current_holder", "location_country"])
 
 
 class AssignableUsersView(ListAPIView):
@@ -379,7 +381,7 @@ class AssignableUsersView(ListAPIView):
         organisation_id = self.kwargs.get("organisationId")
 
         try:
-            company = Company.objects.filter(company_id=organisation_id)
+            company = Company.objects.get(company_id=organisation_id)
         except Company.DoesNotExist:
             raise NotFound("organisation does not exist")
 
@@ -400,7 +402,7 @@ class AssignableUsersView(ListAPIView):
         company=self.get_company()
         query = self.request.query_params.get("q", "").strip()
 
-        queryset = OrganisationMember.objects.get(
+        queryset = OrganisationMember.objects.filter(
             company=company,
             is_active=True,
             user__is_active=True,
@@ -417,19 +419,19 @@ class AssignableUsersView(ListAPIView):
 
 
 class AssignableAssetsView(ListAPIView):
-    serializers = AssignableAssetSerializer
+    serializer_class = AssignableAssetSerializer
     permission_classes = [IsAuthenticated, IsVerified, CanManageAsset]
 
     def get_company(self):
         organisation_id = self.kwargs.get("organisationId")
 
         try:
-            company = Company.objects.filter(company_id=organisation_id)
+            company = Company.objects.get(company_id=organisation_id)
         except Company.DoesNotExist:
             raise NotFound("company does not exist")
 
         is_member = OrganisationMember.objects.filter(
-            user=request.user,
+            user=self.request.user,
             company=company,
             is_active=True,
             role__in=["ADMIN", "STAFF"]
@@ -440,7 +442,7 @@ class AssignableAssetsView(ListAPIView):
 
         return company
 
-    def get_querset(self):
+    def get_queryset(self):
         company = self.get_company()
         query = self.request.query_params.get("q", "").strip()
         include_assigned = self.request.query_params.get("include_assigned", "false").lower() == "true"
@@ -452,7 +454,7 @@ class AssignableAssetsView(ListAPIView):
         if not include_assigned:
             queryset = queryset.filter(status="AVAILABLE", current_holder__isnull=True,)
 
-        if quer:
+        if query:
             queryset = queryset.filter(
                 Q(name__icontains=query) |
                 Q(serial_number__icontains=query) |
@@ -542,7 +544,7 @@ class AssetTransferView(APIView):
 
 
 class AssetReceivedView(APIView):
-    permission_classes = [IsAuthenticated, IsVerified, CanManageAsset]
+    permission_classes = [IsAuthenticated, IsVerified]
 
     @transaction.atomic
     def post(self, request, *args, **kwargs):
@@ -558,7 +560,7 @@ class AssetReceivedView(APIView):
                 status="ACTIVE"
             )
 
-        except Assignment.DoesNotExist:
+        except assignment.DoesNotExist:
             raise NotFound("active assignment not found for this user")
 
         if assignment.received:
@@ -567,10 +569,69 @@ class AssetReceivedView(APIView):
             )
 
         assignment.received = True
-        assignment.save(updated_fields=["received"])
+        assignment.save(update_fields=["received"])
         return Response({
             "detail": "asset marked as received",
             "assignment_id": str(assignment.assignment_id),
             "asset_id": str(assignment.asset.asset_id),
             "received": True
         }, status=200)
+    
+
+class AssetAssignmentPagination(PageNumberPagination):
+    page_size = 10
+    page_size_query_param = "page_size"
+    max_page_size = 50
+
+
+class OrganisationAssignmentListView(ListAPIView):
+    serializer_class = AssetAssignmentListSerializer
+    permission_classes = [IsAuthenticated, IsVerified, CanManageAsset]
+    pagination_class = AssetAssignmentPagination
+
+    def get_company(self):
+        organisation_id = self.kwargs.get("organisationId")
+
+        try:
+            company = Company.objects.get(company_id=organisation_id)
+        except Company.DoesNotExist:
+            raise NotFound("company does not exist")
+
+        is_member = OrganisationMember.objects.filter(
+            user=self.request.user,
+            company=company,
+            is_active=True,
+            role__in=["ADMIN", "STAFF"]
+        ).exists()
+
+        if not is_member:
+            raise PermissionDenied("you do not have permission to view assignments")
+
+        return company
+
+    def get_queryset(self):
+        company = self.get_company()
+        query = self.request.query_params.get("q", "").strip()
+        status_param = self.request.query_params.get("status", "").strip()
+        received_param = self.request.query_params.get("received", "").strip().lower()
+
+        queryset = (
+            AssetAssignment.objects.filter(asset__company=company)
+            .select_related("asset", "user")
+            .order_by("-assignment_id")
+        )
+
+        if query:
+            queryset = queryset.filter(
+                Q(asset__name__icontains=query)
+                | Q(user__email__icontains=query)
+                | Q(location_country__icontains=query)
+            )
+
+        if status_param:
+            queryset = queryset.filter(status=status_param)
+
+        if received_param in ["true", "false"]:
+            queryset = queryset.filter(received=(received_param == "true"))
+
+        return queryset

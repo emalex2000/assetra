@@ -12,8 +12,6 @@ from django.utils.decorators import method_decorator
 from .serializer import (
     CompanySerializer, 
     MyOrganisationSerializer, 
-    OrganisationSearchSerializer,
-    JoinRequestSerializer,
     JoinRequestListSerializer,
     JoinRequestReviewSerializer,
     OrganisationSearchResultSerializer,
@@ -121,12 +119,37 @@ class ResendOtpView(APIView):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsVerified])
 def current_user(request):
+
+    user = request.user
+    memberships = OrganisationMember.objects.filter(
+        user=user,
+        is_active=True,
+        company__isnull=False,
+    ).select_related("company")
+
+    roles = []
+    for membership in memberships:
+        roles.append({
+            "company_id": str(membership.company.company_id),
+            "company_name": membership.company.name,
+            "role": membership.role,
+        })
+
+    profile_image_url = None
+    if user.profile_image:
+        try:
+            profile_image_url = request.build_absolute_uri(user.profile_image.url)
+        except ValueError:
+            profile_image_url = None
+        
     return Response(
         {
-            'id': request.user.id,
-            'email': request.user.email,
-        }
-    )
+            'id': str(user.id),
+            'email':user.email,
+            'phone_number': str(user.phone_number) if user.phone_number else "",
+            "profile_image": profile_image_url,
+            'roles': roles,
+        })
 
 
 @method_decorator(ratelimit(key='ip', rate='10/m', block=True), name='dispatch')
