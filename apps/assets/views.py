@@ -29,6 +29,7 @@ from django.db import transaction
 from django.db.models import Q
 from .models import AssetImportColumnMapping, AssetImportRow, AssetTransfer
 from rest_framework.pagination import PageNumberPagination
+from .tasks import commit_asset_import_task
 
 class CreateAssetView(CreateAPIView):
     serializer_class = AssetSerializer
@@ -327,9 +328,14 @@ class AssetImportCommitView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         
-        result = commit_import_rows(import_session)
+        task = commit_asset_import_task.delay(str(import_session.import_id))
 
-        return Response(result, status=status.HTTP_200_OK)
+        return Response({
+            "import_id": str(import_session.import_id),
+            "task_id": task.id,
+            "status": "QUEUED",
+            "detail": "asset import has been queued for processing",
+        })
     
     
 class CreateAssetAssigmentView(CreateAPIView):

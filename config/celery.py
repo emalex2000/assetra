@@ -9,8 +9,9 @@ os.environ.setdefault(
 
 app = Celery("asset_tracker")
 
+
 app.config_from_object(
-    "django.confsettings",
+    "django.conf:settings",
     namespace="CELERY"
 )
 
