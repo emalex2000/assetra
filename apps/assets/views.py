@@ -30,6 +30,8 @@ from django.db.models import Q
 from .models import AssetImportColumnMapping, AssetImportRow, AssetTransfer
 from rest_framework.pagination import PageNumberPagination
 from .tasks import commit_asset_import_task
+from django.shortcuts import get_object_or_404
+
 
 class CreateAssetView(CreateAPIView):
     serializer_class = AssetSerializer
@@ -552,37 +554,54 @@ class AssetTransferView(APIView):
 class AssetReceivedView(APIView):
     permission_classes = [IsAuthenticated, IsVerified]
 
+    def get_company(self,):
+        organisation_id = self.kwargs.get("organisationId")
+        try:
+            company = Company.objects.get(company_id=organisation_id)
+        except Company.DoesNotExist:
+            raise NotFound("organisation not found")
+    
+        is_member = OrganisationMember.objects.filter(
+            user=self.request.user,
+            company=company,
+            is_active=True,
+        ).exists()
+
+        if not is_member:
+            raise PermissionDenied('you are not a member of this organisation')
+        
+        return company
+    
+    
     @transaction.atomic
-    def post(self, request, *args, **kwargs):
+    def post(self, request, *ags, **kwargs):
+        company = self.get_company()
         serializer = AssetReceivedSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         assignment_id = serializer.validated_data["assignment_id"]
-
         try:
             assignment = AssetAssignment.objects.select_related("asset", "user").get(
                 assignment_id=assignment_id,
                 user=request.user,
-                status="ACTIVE"
+                asset__company=company,
+                status="ACTIVE",
             )
-
-        except assignment.DoesNotExist:
-            raise NotFound("active assignment not found for this user")
-
+        except AssetAssignment.DoesNotExist:
+            raise PermissionDenied('the assignment does not exist')
+        
         if assignment.received:
-            return Response(
-                {"detail":"asset already marked as received"}, status=400
-            )
-
+            return Response({"detail": "asset already marked as received"}, status=400)
+        
         assignment.received = True
         assignment.save(update_fields=["received"])
         return Response({
             "detail": "asset marked as received",
             "assignment_id": str(assignment.assignment_id),
             "asset_id": str(assignment.asset.asset_id),
-            "received": True
+            "received": True,
         }, status=200)
-    
+
 
 class AssetAssignmentPagination(PageNumberPagination):
     page_size = 10
@@ -590,54 +609,33 @@ class AssetAssignmentPagination(PageNumberPagination):
     max_page_size = 50
 
 
-class OrganisationAssignmentListView(ListAPIView):
-    serializer_class = AssetAssignmentListSerializer
-    permission_classes = [IsAuthenticated, IsVerified, CanManageAsset]
-    pagination_class = AssetAssignmentPagination
+class AssignmentListView(APIView):
+    permission_classes = [IsAuthenticated, IsVerified]
 
-    def get_company(self):
-        organisation_id = self.kwargs.get("organisationId")
+    def get(self, request, organisationId):
+        company = get_object_or_404(Company, company_id=organisationId)
 
-        try:
-            company = Company.objects.get(company_id=organisation_id)
-        except Company.DoesNotExist:
-            raise NotFound("company does not exist")
-
-        is_member = OrganisationMember.objects.filter(
-            user=self.request.user,
+        membership = OrganisationMember.objects.filter(
+            user=request.user,
             company=company,
             is_active=True,
-            role__in=["ADMIN", "STAFF"]
-        ).exists()
+        ).first()
 
-        if not is_member:
-            raise PermissionDenied("you do not have permission to view assignments")
+        if not membership:
+            raise PermissionDenied("You are not a member of this organisation.")
 
-        return company
+        assignments = AssetAssignment.objects.select_related(
+            "asset",
+            "user",
+            "assigned_by",
+        ).filter(asset__company=company)
 
-    def get_queryset(self):
-        company = self.get_company()
-        query = self.request.query_params.get("q", "").strip()
-        status_param = self.request.query_params.get("status", "").strip()
-        received_param = self.request.query_params.get("received", "").strip().lower()
+        if membership.role not in ["ADMIN", "STAFF"]:
+            assignments = assignments.filter(user=request.user)
 
-        queryset = (
-            AssetAssignment.objects.filter(asset__company=company)
-            .select_related("asset", "user")
-            .order_by("-assignment_id")
-        )
+        paginator = PageNumberPagination()
+        paginator.page_size = 10
+        page = paginator.paginate_queryset(assignments, request)
 
-        if query:
-            queryset = queryset.filter(
-                Q(asset__name__icontains=query)
-                | Q(user__email__icontains=query)
-                | Q(location_country__icontains=query)
-            )
-
-        if status_param:
-            queryset = queryset.filter(status=status_param)
-
-        if received_param in ["true", "false"]:
-            queryset = queryset.filter(received=(received_param == "true"))
-
-        return queryset
+        serializer = AssetAssignmentListSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)

@@ -43,10 +43,10 @@ def commit_import_rows(import_session):
                 asset = Asset.objects.create(
                     company=company,
                     name=data.get("name"),
-                    serial_number=data.get("serial_number"),
-                    model=data.get("model"),
+                    serial_number=data.get("serial_number") or None,
+                    model=data.get("model") or None,
                     category=category_obj,
-                    location_country=data.get("location_country"),
+                    location_country=data.get("location_country") or "",
                 )
 
                 row.imported_assets = asset

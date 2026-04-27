@@ -122,41 +122,39 @@ def validate_import_rows(import_session):
 
         # duplicate in file
         if serial_number and serial_number in duplicate_serials_in_file:
-            errors.append("Serial number is duplicated in the uploaded file.")
+            serial_number = None
 
-        # duplicate in database
         if serial_number and serial_number in existing_serials:
-            errors.append("Serial number already exists in the database.")
+            serial_number = None
 
         # category validation
         resolved_category_name = None
+
         if category_value:
             category_obj = company_categories.get(category_value.lower())
-            if not category_obj:
-                errors.append(
-                    f"Category '{category_value}' does not exist for this organisation."
-                )
-            else:
+
+            if category_obj:
                 resolved_category_name = category_obj.name
 
         # country validation
-        resolved_country_code = None
+        resolved_country_code = ""
+
         if location_country_value:
             resolved_country_code, country_error = resolve_country(
                 location_country_value,
                 code_lookup,
                 name_lookup,
             )
-            if country_error:
-                errors.append(country_error)
 
+    if country_error:
+        resolved_country_code = ""
         # optionally rewrite normalized data into cleaner form
         cleaned_data = {
             "name": name,
             "serial_number": serial_number,
             "model": model,
-            "category": resolved_category_name or category_value,
-            "location_country": resolved_country_code or location_country_value,
+            "category": resolved_category_name,
+            "location_country": resolved_country_code,
         }
 
         row.normalized_data = cleaned_data
